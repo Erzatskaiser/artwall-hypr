@@ -1,0 +1,15 @@
+[project]
+name = "artwall-hypr"
+version = "0.1.0"
+description = "Automatically identify and annotate Hyprland desktop wallpapers using local CLIP vector search, Ollama VLMs, and dynamic typography"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "curl-cffi>=0.15.0",
+    "numpy>=2.5.1",
+    "open-clip-torch>=3.3.0",
+    "pillow>=12.3.0",
+    "requests>=2.34.2",
+    "torch>=2.13.0",
+]
