@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.5.1",
     "open-clip-torch>=3.3.0",
     "pillow>=12.3.0",
+    "pygobject>=3.56.3",
     "requests>=2.34.2",
     "torch>=2.13.0",
 ]

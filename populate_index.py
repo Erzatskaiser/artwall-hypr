@@ -138,24 +138,25 @@ def ingest_met(index: LocalCLIPIndex, target_count: int = 200):
             logger.debug(f"Skipping Met object {oid}: {e}")
             continue
 
-def ingest_wikiart(index: LocalCLIPIndex, target_count_per_artist: int = 25):
-    """Scrapes masterpieces from WikiArt with robust dictionary unwrapping."""
-    logger.info("=== Starting Ingestion: WikiArt Masterpieces ===")
+def ingest_wikiart(index: LocalCLIPIndex, target_count: int = 400):
+    """Scrapes the most viewed masterpieces from WikiArt without hardcoding artists."""
+    logger.info("=== Starting Ingestion: WikiArt Most Viewed ===")
     
-    artists = [
-        "vincent-van-gogh", "claude-monet", "rembrandt", "johannes-vermeer",
-        "leonardo-da-vinci", "gustav-klimt", "edvard-munch", "pierre-auguste-renoir",
-        "caravaggio", "paul-cezanne", "jmw-turner", "john-singer-sargent",
-        "camille-pissarro", "edouard-manet", "diego-velazquez", "ilyas-repin"
-    ]
+    added = 0
+    page = 1
+    consecutive_errors = 0
     
-    total_added = 0
-    for artist_slug in artists:
-        url = f"https://www.wikiart.org/en/api/2/PaintingsByArtist?artistUrl={artist_slug}&format=json"
+    while added < target_count:
+        if consecutive_errors >= 5:
+            logger.warning("WikiArt API rate limit or connection issues detected. Stopping early.")
+            break
+            
+        # Paginating through the MostViewedPaintings endpoint
+        url = f"https://www.wikiart.org/en/api/2/MostViewedPaintings?page={page}"
         try:
             res = requests.get(url, headers=HEADERS, timeout=15).json()
             
-            # CRITICAL FIX: Unwrap the list if WikiArt returned a dictionary instead of a raw list
+            # Safely unwrap the JSON response
             if isinstance(res, dict):
                 artworks = res.get("data") or res.get("paintings") or []
             elif isinstance(res, list):
@@ -163,14 +164,16 @@ def ingest_wikiart(index: LocalCLIPIndex, target_count_per_artist: int = 25):
             else:
                 artworks = []
 
-            logger.info(f"Found {len(artworks)} paintings for {artist_slug} on WikiArt.")
+            if not artworks:
+                logger.info("No more paintings returned from WikiArt pagination.")
+                break
+
+            logger.info(f"WikiArt Page {page} fetched. Processing {len(artworks)} paintings...")
             
-            added_for_artist = 0
             for item in artworks:
-                if added_for_artist >= target_count_per_artist:
+                if added >= target_count:
                     break
                 
-                # Safety check to guarantee item is a dictionary before calling .get()
                 if not isinstance(item, dict):
                     continue
                     
@@ -179,7 +182,7 @@ def ingest_wikiart(index: LocalCLIPIndex, target_count_per_artist: int = 25):
                     continue
                     
                 title = str(item.get("title") or "Unknown Title").strip()
-                artist = str(item.get("artistName") or artist_slug.replace("-", " ").title()).strip()
+                artist = str(item.get("artistName") or "Unknown Artist").strip()
                 year = str(item.get("completitionYear") or item.get("yearAsString") or "").strip()
                 
                 tmp_path = download_temp_image(img_url)
@@ -188,29 +191,34 @@ def ingest_wikiart(index: LocalCLIPIndex, target_count_per_artist: int = 25):
                     tmp_path.unlink(missing_ok=True)
                     
                     if success:
-                        added_for_artist += 1
-                        total_added += 1
-                        logger.info(f"[WikiArt -> {artist}] Indexed: {title} ({year})")
+                        added += 1
+                        logger.info(f"[WikiArt {added}/{target_count}] Indexed: {title} — {artist} ({year})")
                 
                 time.sleep(0.3)
-        except Exception as e:
-            logger.warning(f"Failed to ingest WikiArt artist {artist_slug}: {e}")
-            continue
+                
+            page += 1
+            consecutive_errors = 0  # Reset breaker on a successful page load
             
-    logger.info(f"Finished WikiArt ingestion. Total added: {total_added}")
+        except Exception as e:
+            consecutive_errors += 1
+            logger.warning(f"Failed to fetch WikiArt page {page}: {e}")
+            time.sleep(2)  # Give the server a brief pause before retrying the next page
+            page += 1
+            
+    logger.info(f"Finished WikiArt ingestion. Total added: {added}")
 
 def main():
     logger.info("Initializing Local CLIP Index...")
     index = LocalCLIPIndex()
     
-    # 1. Ingest Art Institute of Chicago (e.g., 200 public domain masterpieces)
+    # Ingest Art Institute of Chicago
     ingest_aic(index, target_count=800)
     
-    # 2. Ingest The Met (e.g., 200 classical paintings)
+    # 2. Ingest The Met
     ingest_met(index, target_count=800)
     
-    # 3. Ingest WikiArt (25 masterpieces across 16 iconic painters = ~400 paintings)
-    ingest_wikiart(index, target_count_per_artist=40)
+    # 3. Ingest WikiArt
+    ingest_wikiart(index, target_count=800)
     
     logger.info("==================================================")
     logger.info(f"Ingestion Complete! Total artworks in database: {len(index.metadata)}")

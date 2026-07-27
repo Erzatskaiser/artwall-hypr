@@ -25,31 +25,40 @@ def main():
     setup_logging(args.verbose)
     logger = logging.getLogger("artwall.main")
 
+    # Initialize Config
     cfg = Config()
-    intel = ArtIntelligence(cfg.ollama_url, cfg.vlm_model)
+    
+    # Initialize the new classes using the config object
+    intel = ArtIntelligence(cfg)
     renderer = WallpaperRenderer(cfg)
 
     logger.info("Detecting active wallpaper...")
     current_wall = get_current_wallpaper_path()
-    
+
     if not current_wall:
+        logger.error("Could not detect active wallpaper.")
         sys.exit(1)
 
     if cfg.wallpaper_dir.parts != current_wall.parent.parts:
         logger.warning(f"Active wallpaper {current_wall.name} is not inside target directory {cfg.wallpaper_dir}. Skipping.")
         sys.exit(0)
 
-    meta = intel.identify_via_vlm(current_wall)
-
-    if not meta or not meta.get("title"):
-        logger.info(f"VLM uncertain or identification failed for {current_wall.name}. Wallpaper remains unchanged.")
-        sys.exit(0)
-
-    logger.info("Painting identified. Generating annotation...")
     try:
-        temp_wall_path = renderer.burn_multiline_text(current_wall, meta)
-        renderer.apply_to_hyprpaper(temp_wall_path)
+        # Run the full offline pipeline (Cache -> CLIP -> Ollama)
+        meta = intel.process_wallpaper(current_wall)
+
+        if not meta or not meta.get("title"):
+            logger.info(f"Pipeline failed to generate metadata for {current_wall.name}.")
+            sys.exit(0)
+
+        # Apply the original un-modified image to the desktop
+        renderer.apply_to_hyprpaper(current_wall)
+        
+        # Launch the GTK Wayland Layer-Shell overlay with the new metadata
+        renderer.render_overlay(meta)
+        
         logger.info("Done.")
+        
     except Exception as e:
         logger.error(f"Failed to process wallpaper: {e}")
         sys.exit(1)
