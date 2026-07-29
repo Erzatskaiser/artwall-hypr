@@ -41,6 +41,9 @@ class LocalCLIPIndex:
 
         self.embeddings = None
         self.metadata = []
+        
+        # Buffer to prevent excessive disk writes during massive ingestions
+        self.unsaved_changes = 0 
 
         # Enforce CPU usage to save VRAM for Ollama inference
         self.device = "cpu"
@@ -64,7 +67,7 @@ class LocalCLIPIndex:
             )
 
     def _init_model(self) -> bool:
-        """Lazy-loads the OpenCLIP ViT-B-32 model only when a search is executed."""
+        """Lazy-loads the OpenCLIP ViT-B-32 model only when a search or ingest is executed."""
         if not HAS_CLIP:
             logger.warning(
                 "OpenCLIP/PyTorch not installed. Local CLIP search disabled."
@@ -80,6 +83,63 @@ class LocalCLIPIndex:
             )
             self.tokenizer = open_clip.get_tokenizer("ViT-B-32")
         return True
+
+    def add_to_index(self, image_path: Path, title: str, artist: str, year: str) -> bool:
+        """
+        Computes the CLIP vector for a downloaded image and adds it to the index.
+        Saves to disk automatically every 50 images to prevent SSD wear and tear.
+        """
+        if not self._init_model():
+            return False
+
+        try:
+            # 1. Preprocess image
+            image = Image.open(image_path).convert("RGB")
+            image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+
+            # 2. Extract 512-dimensional vector embedding
+            with torch.no_grad(), torch.cuda.amp.autocast():
+                query_feature = self.model.encode_image(image_tensor)
+                query_feature /= query_feature.norm(dim=-1, keepdim=True)
+                query_vector = query_feature.cpu().numpy().flatten()
+
+            # 3. Append to memory
+            self.metadata.append({
+                "title": title,
+                "artist": artist,
+                "year": year
+            })
+
+            if self.embeddings is None:
+                self.embeddings = np.array([query_vector])
+            else:
+                self.embeddings = np.vstack([self.embeddings, query_vector])
+
+            # 4. Smart Saving
+            self.unsaved_changes += 1
+            if self.unsaved_changes >= 50:
+                self.save_index()
+                
+            return True
+
+        except Exception as e:
+            logger.error(f"Error computing embedding for {title}: {e}")
+            return False
+
+    def save_index(self):
+        """Flushes the in-memory arrays to the SSD."""
+        if self.unsaved_changes == 0:
+            return
+            
+        try:
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+            if self.embeddings is not None:
+                np.save(self.embeddings_path, self.embeddings)
+            with open(self.metadata_path, "w", encoding="utf-8") as f:
+                json.dump(self.metadata, f, indent=4)
+            self.unsaved_changes = 0
+        except Exception as e:
+            logger.error(f"Failed to save index to disk: {e}")
 
     def search(self, image_path: Path) -> Tuple[Optional[Dict[str, str]], float]:
         """
