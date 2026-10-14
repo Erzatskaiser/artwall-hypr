@@ -11,6 +11,7 @@ dependencies = [
     "pygobject>=3.56.3",
     "requests>=2.34.2",
     "torch>=2.13.0",
+    "torchvision>=0.28.0",
 ]
 
 [project.scripts]
@@ -20,6 +21,18 @@ artwall-index = "artwall.ingest:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+
+# The CLIP model runs on CPU, so pull the CPU-only builds of torch and torchvision.
+# The default wheels bundle the whole CUDA stack, which is roughly 2.5 GB of libraries
+# this project never loads.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

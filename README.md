@@ -47,6 +47,9 @@ Thresholds and fallback behaviour live in `artwall/config.py`.
 * Python 3.14 or newer
 * System libraries: `gtk3`, `gtk-layer-shell`, `gobject-introspection`, `cairo`, `pkgconf`
 
+No GPU is needed. The CPU-only builds of torch and torchvision are pinned, which keeps
+the virtualenv around 900 MB rather than the 4.7 GB the default CUDA wheels pull in.
+
 On Arch:
 
 ```bash
@@ -64,6 +67,9 @@ uv sync
 That creates the virtualenv, installs the dependencies, and puts `artwall`,
 `artwall-daemon` and `artwall-index` on the path inside it. PyGObject builds against the
 system GTK libraries listed above, so install those first.
+
+Identifying one wallpaper takes about four seconds the first time, which is the model
+loading, and under a third of a second after that.
 
 Without `uv`, a plain `python -m venv .venv && pip install -e .` works the same way.
 
