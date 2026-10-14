@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("artwall.ingest")
 
-# Polite User-Agent required by museum open-data policies
+# Museum open data policies ask for an identifying user agent
 HEADERS = {
     "User-Agent": "artwall-ingest/2.0 "
     "(personal desktop wallpaper indexer; +https://github.com/Erzatskaiser/artwall-hypr)"
@@ -48,7 +48,7 @@ def download_temp_image(url: str) -> Optional[Path]:
 
 def ingest_aic(index: LocalCLIPIndex, target_count: int = 2000):
     """Scrapes paintings from the Art Institute of Chicago Open Access API."""
-    logger.info("=== Starting Ingestion: Art Institute of Chicago ===")
+    logger.info("Ingesting: Art Institute of Chicago")
     added = 0
     page = 1
 
@@ -82,7 +82,7 @@ def ingest_aic(index: LocalCLIPIndex, target_count: int = 2000):
                         success = index.add_to_index(tmp_path, title, artist, year)
                         if success:
                             added += 1
-                            logger.info(f"[AIC {added}/{target_count}] Indexed: {title} — {artist}")
+                            logger.info(f"[AIC {added}/{target_count}] Indexed: {title} by {artist}")
                     finally:
                         tmp_path.unlink(missing_ok=True) # Guaranteed cleanup
 
@@ -96,7 +96,7 @@ def ingest_aic(index: LocalCLIPIndex, target_count: int = 2000):
 
 def ingest_cleveland(index: LocalCLIPIndex, target_count: int = 2000):
     """Scrapes paintings from the Cleveland Museum of Art (CMA) Open Access API."""
-    logger.info("=== Starting Ingestion: Cleveland Museum of Art ===")
+    logger.info("Ingesting: Cleveland Museum of Art")
     added = 0
     skip = 0
     
@@ -130,7 +130,7 @@ def ingest_cleveland(index: LocalCLIPIndex, target_count: int = 2000):
                         success = index.add_to_index(tmp_path, title, artist, year)
                         if success:
                             added += 1
-                            logger.info(f"[CMA {added}/{target_count}] Indexed: {title} — {artist}")
+                            logger.info(f"[CMA {added}/{target_count}] Indexed: {title} by {artist}")
                     finally:
                         tmp_path.unlink(missing_ok=True)
                         
@@ -143,7 +143,7 @@ def ingest_cleveland(index: LocalCLIPIndex, target_count: int = 2000):
 
 def ingest_smk(index: LocalCLIPIndex, target_count: int = 2000):
     """Scrapes paintings from the National Gallery of Denmark (SMK) in English."""
-    logger.info("=== Starting Ingestion: National Gallery of Denmark (SMK) ===")
+    logger.info("Ingesting: National Gallery of Denmark (SMK)")
     added = 0
     offset = 0
     
@@ -178,7 +178,7 @@ def ingest_smk(index: LocalCLIPIndex, target_count: int = 2000):
                         success = index.add_to_index(tmp_path, title, artist, year)
                         if success:
                             added += 1
-                            logger.info(f"[SMK {added}/{target_count}] Indexed: {title} — {artist}")
+                            logger.info(f"[SMK {added}/{target_count}] Indexed: {title} by {artist}")
                     finally:
                         tmp_path.unlink(missing_ok=True)
                         
@@ -190,8 +190,8 @@ def ingest_smk(index: LocalCLIPIndex, target_count: int = 2000):
             break
 
 def ingest_met(index: LocalCLIPIndex, target_count: int = 2000):
-    """Scrapes paintings from The Met with a circuit breaker for rate limits."""
-    logger.info("=== Starting Ingestion: The Met Museum ===")
+    """Paintings from the Met. Gives up after repeated failures, which usually means rate limiting."""
+    logger.info("Ingesting: The Met Museum")
     search_url = "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&medium=Paintings&q=painting"
 
     try:
@@ -230,7 +230,7 @@ def ingest_met(index: LocalCLIPIndex, target_count: int = 2000):
                     success = index.add_to_index(tmp_path, title, artist, year)
                     if success:
                         added += 1
-                        logger.info(f"[MET {added}/{target_count}] Indexed: {title} — {artist}")
+                        logger.info(f"[MET {added}/{target_count}] Indexed: {title} by {artist}")
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
@@ -242,8 +242,8 @@ def ingest_met(index: LocalCLIPIndex, target_count: int = 2000):
 
 
 def ingest_wikiart(index: LocalCLIPIndex, target_count: int = 2000):
-    """Scrapes the most viewed masterpieces from WikiArt."""
-    logger.info("=== Starting Ingestion: WikiArt Most Viewed ===")
+    """Most viewed paintings from WikiArt."""
+    logger.info("Ingesting: WikiArt Most Viewed")
     added = 0
     page = 1
     consecutive_errors = 0
@@ -287,7 +287,7 @@ def ingest_wikiart(index: LocalCLIPIndex, target_count: int = 2000):
                         success = index.add_to_index(tmp_path, title, artist, year)
                         if success:
                             added += 1
-                            logger.info(f"[WikiArt {added}/{target_count}] Indexed: {title} — {artist} ({year})")
+                            logger.info(f"[WikiArt {added}/{target_count}] Indexed: {title} by {artist} ({year})")
                     finally:
                         tmp_path.unlink(missing_ok=True)
 
@@ -304,7 +304,7 @@ def ingest_wikiart(index: LocalCLIPIndex, target_count: int = 2000):
 
 def ingest_nga(index: LocalCLIPIndex, target_count: int = 2000):
     """Scrapes paintings from the National Gallery of Art (NGA) via their Open Data CSVs."""
-    logger.info("=== Starting Ingestion: National Gallery of Art (NGA) ===")
+    logger.info("Ingesting: National Gallery of Art (NGA)")
     
     # NGA hosts their dataset on GitHub
     base_url = "https://raw.githubusercontent.com/NationalGalleryOfArt/opendata/main/data/"
@@ -343,7 +343,7 @@ def ingest_nga(index: LocalCLIPIndex, target_count: int = 2000):
             if added >= target_count:
                 break
                 
-            # FIXED: Added .lower() to ensure "Painting" and "painting" both pass the filter
+            # The CSV is inconsistent about capitalisation here
             classification = str(row.get("classification", "")).lower()
             medium = str(row.get("medium", "")).lower()
             
@@ -365,7 +365,7 @@ def ingest_nga(index: LocalCLIPIndex, target_count: int = 2000):
                     success = index.add_to_index(tmp_path, title, artist, year)
                     if success:
                         added += 1
-                        logger.info(f"[NGA {added}/{target_count}] Indexed: {title} — {artist}")
+                        logger.info(f"[NGA {added}/{target_count}] Indexed: {title} by {artist}")
                 finally:
                     tmp_path.unlink(missing_ok=True)
                     

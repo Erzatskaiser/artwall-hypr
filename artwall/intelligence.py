@@ -26,8 +26,9 @@ logger = logging.getLogger("artwall.intelligence")
 
 class LocalCLIPIndex:
     """
-    Handles local offline vector searches using OpenAI's CLIP architecture.
-    Compares the current wallpaper against a pre-computed database of museum masterpieces.
+    Cosine similarity search over a prebuilt matrix of artwork embeddings.
+
+    The model runs on CPU so it does not compete with Ollama for VRAM.
     """
 
     def __init__(self, index_dir: Path | str = Path.home() / ".cache" / "artwall" / "clip_index"):
@@ -91,8 +92,10 @@ class LocalCLIPIndex:
 
     def add_to_index(self, image_path: Path, title: str, artist: str, year: str) -> bool:
         """
-        Computes the CLIP vector for a downloaded image and adds it to the index.
-        Saves to disk automatically every 50 images to prevent SSD wear and tear.
+        Embeds an image and appends it to the index.
+
+        Writes to disk every 50 images rather than on every one, so a long ingest run
+        does not spend its time rewriting the same files.
         """
         if not self._init_model():
             return False
@@ -117,7 +120,7 @@ class LocalCLIPIndex:
 
             self._pending.append(query_vector)
 
-            # 4. Smart Saving
+            # Periodic flush so an interrupted run keeps most of its work
             self.unsaved_changes += 1
             if self.unsaved_changes >= 50:
                 self.save_index()
@@ -244,8 +247,11 @@ class ArtIntelligence:
         self, image_path: Path, context: str, mode: str = "confident"
     ) -> str:
         """
-        Sends the image payload to the local Ollama instance.
-        Aggressively constrained to prevent spatial rambling and robotic phrasing.
+        Asks the local Ollama model to describe the image.
+
+        The prompts are deliberately restrictive. Without them these models tend to
+        narrate object positions ("on the left there is a tree") rather than say
+        anything about the painting.
         """
         try:
             with open(image_path, "rb") as f:
@@ -254,7 +260,6 @@ class ArtIntelligence:
             logger.error(f"Could not read image for VLM payload: {e}")
             return ""
 
-        # Heavily constrained Guardrail Prompting
         if mode == "confident":
             prompt = (
                 f"You are a poetic art critic analyzing '{context}'. "
@@ -313,7 +318,7 @@ class ArtIntelligence:
         logger.info(f"Analyzing {image_path.name}...")
         img_hash = self._hash_image(image_path)
 
-        # Tier 1: SHA-256 Cache Hit
+        # Already seen this exact file
         if img_hash and img_hash in self.known_art:
             logger.info(
                 "Identical image found in local cache. Skipping AI analysis."
@@ -327,7 +332,7 @@ class ArtIntelligence:
             "description": "",
         }
 
-        # Tier 2: Offline Vector Search
+        # Look for the closest artwork in the index
         clip_match, score = self.clip_index.search(image_path)
 
         if not clip_match:
@@ -338,7 +343,7 @@ class ArtIntelligence:
 
         # Decide how to report the match. Thresholds live in the config.
         if score >= self.cfg.confident_score:
-            # Tier 3a: Confident Exact Match
+            # Close enough to name the artwork outright
             meta["title"] = clip_match["title"]
             meta["artist"] = clip_match["artist"]
             meta["year"] = clip_match.get("year", "")
@@ -347,7 +352,7 @@ class ArtIntelligence:
             )
             
         elif score >= self.cfg.fuzzy_score or self.cfg.fallback_mode == "reminiscent":
-            # Tier 3b: fuzzy match, or a weak match that the config asks to report anyway
+            # A resemblance, or a weak match the config still wants reported as one
             meta["title"] = f"Reminiscent of: {clip_match['title']}"
             meta["artist"] = clip_match["artist"]
             meta["year"] = clip_match.get("year", "")
@@ -356,7 +361,7 @@ class ArtIntelligence:
             )
             
         else:
-            # Tier 3c: Unknown Art Fallback (Haiku)
+            # Nothing close in the index
             logger.info("Local vector miss. Running local VLM haiku generator.")
             meta["description"] = self._generate_vlm_description(
                 image_path, context="", mode="unknown"

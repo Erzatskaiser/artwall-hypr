@@ -59,12 +59,14 @@ ollama pull llava:7b
 ```bash
 git clone https://github.com/Erzatskaiser/artwall-hypr.git
 cd artwall-hypr
-uv venv
-source .venv/bin/activate
 uv sync
 ```
 
-PyGObject builds against the system GTK libraries listed above, so install those first.
+That creates the virtualenv, installs the dependencies, and puts `artwall`,
+`artwall-daemon` and `artwall-index` on the path inside it. PyGObject builds against the
+system GTK libraries listed above, so install those first.
+
+Without `uv`, a plain `python -m venv .venv && pip install -e .` works the same way.
 
 ## Building the index
 
@@ -73,7 +75,7 @@ open access museum APIs, embeds them, and writes the vectors to
 `~/.cache/artwall/clip_index`:
 
 ```bash
-python -m artwall.ingest
+uv run artwall-index
 ```
 
 Sources are the National Gallery of Art, the Cleveland Museum of Art, the National Gallery
@@ -84,7 +86,7 @@ interrupted, and whatever has been indexed so far is saved.
 For a subset, or a shorter run:
 
 ```bash
-python -m artwall.ingest --sources nga,met --limit 500
+uv run artwall-index --sources nga,met --limit 500
 ```
 
 ## Running it
@@ -92,14 +94,14 @@ python -m artwall.ingest --sources nga,met --limit 500
 Once, against the current wallpaper:
 
 ```bash
-python -m artwall.cli          # -v shows match scores and timings
-python -m artwall.cli --clear  # take the overlay off screen
+uv run artwall          # -v shows match scores and timings
+uv run artwall --clear  # take the overlay off screen
 ```
 
 As a daemon that watches for wallpaper changes:
 
 ```bash
-python -m artwall.daemon
+uv run artwall-daemon
 ```
 
 To start it with your session, add this to `~/.config/hypr/hyprland.conf`:
@@ -108,8 +110,7 @@ To start it with your session, add this to `~/.config/hypr/hyprland.conf`:
 exec-once = /path/to/artwall-hypr/.venv/bin/python -m artwall.daemon
 ```
 
-Installing the package also provides `artwall`, `artwall-daemon` and `artwall-index` as
-commands.
+Inside an activated virtualenv the same commands work without the `uv run` prefix.
 
 ## Configuration
 
@@ -133,8 +134,8 @@ The wallpaper directory is compared after resolving symlinks, so pointing
 ## Tests
 
 ```bash
-uv pip install pytest
-python -m pytest tests/
+uv sync --extra dev
+uv run pytest tests/
 ```
 
 ## Limitations
@@ -150,6 +151,8 @@ python -m pytest tests/
   instant.
 * The daemon polls `hyprctl` instead of subscribing to an event, because hyprpaper does
   not emit wallpaper change events.
+* The overlay sits on the bottom layer, just above the wallpaper, so any open window
+  covers it. It is meant to be read on an empty workspace.
 
 ## License
 
