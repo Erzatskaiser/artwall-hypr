@@ -54,7 +54,7 @@ def main():
                     logger.info(f"Wallpaper change detected! New image: {current_wall.name}")
                     
                     try:
-                        # Cache lookup, then CLIP, then the VLM
+                        # Cache lookup, then the CLIP index
                         meta = intel.process_wallpaper(current_wall)
                         
                         # Put the result on screen

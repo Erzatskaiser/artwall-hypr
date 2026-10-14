@@ -39,7 +39,7 @@ uv run artwall-index --sources met --limit 200
 
 ## Notes
 
-* The CLIP model runs on CPU on purpose, so it does not compete with Ollama for VRAM.
+* The CLIP model runs on CPU on purpose. Nothing here should need a GPU.
 * Keep the overlay process free of heavy imports. It is spawned on every wallpaper change
   and should appear quickly.
 * Anything written into Pango markup must be escaped. An unescaped `&` in an artwork

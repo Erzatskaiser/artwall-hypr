@@ -1,9 +1,14 @@
 # artwall-hypr
 
-Identifies the painting on your Hyprland desktop and annotates it with a small overlay in
-the corner of the screen. Everything runs locally: a CLIP index of museum collections does
-the matching, and a local Ollama vision model writes the description. No API keys, and no
-image leaves the machine.
+Identifies the painting on your Hyprland desktop and labels it with a small overlay in the
+corner of the screen. Matching is a cosine similarity search against a local CLIP index
+built from open access museum collections. It runs on CPU in about a second, needs no
+network once the index exists, and no image leaves the machine.
+
+![artwall-hypr labelling a wallpaper](docs/screenshot.jpg)
+
+*The label sits in the bottom right. Here the wallpaper scored 0.884 against the index, just
+under the confident threshold, so it is offered as a resemblance rather than named outright.*
 
 Wallpaper files are never modified. The text is drawn on a `gtk-layer-shell` surface above
 the wallpaper, so the original image stays untouched on disk.
@@ -15,35 +20,30 @@ the wallpaper, so the original image stays untouched on disk.
          |
          v
  +---------------+
- | SHA-256 cache | --(hit)--> show stored metadata, no inference
+ | SHA-256 cache | --(hit)--> show stored result
  +-------+-------+
          | (miss)
          v
  +----------------------+
- | local CLIP index     | --> score >= 0.92 : reported as that artwork
- +-------+--------------+     score >= 0.75 : reported as "Reminiscent of ..."
-         |
-         v
- +----------------------+
- | local Ollama VLM     | --> writes the description, or a haiku on a weak match
- +----------------------+
+ | local CLIP index     | --> score >= 0.92 : named as that artwork
+ +----------------------+     score >= 0.75 : shown as "Reminiscent of ..."
+                              below that    : shown as a resemblance, or nothing
 ```
 
 1. The wallpaper file is hashed. A hash seen before skips straight to the stored result,
    so repeat wallpapers cost nothing.
 2. CLIP (`ViT-B-32`, on CPU) embeds the image and compares it against a prebuilt matrix of
    museum artwork embeddings using cosine similarity.
-3. The score decides how the result is phrased. A confident match is named outright, a
-   fuzzy one is described as a resemblance, and a weak match falls back to either a
-   resemblance or a haiku depending on `fallback_mode`.
-4. The vision model writes one or two sentences, which go into the overlay.
+3. The score decides how the result is phrased. A confident match is named outright and
+   a fuzzy one is shown as a resemblance. Below that, `show_weak_matches` decides whether
+   the nearest artwork is offered anyway or nothing is shown.
+4. The title, artist and year go into the overlay.
 
 Thresholds and fallback behaviour live in `artwall/config.py`.
 
 ## Requirements
 
 * Hyprland, with `hyprpaper` setting the wallpaper
-* `ollama` running locally with a vision model pulled, such as `llava:7b` or `moondream`
 * Python 3.14 or newer
 * System libraries: `gtk3`, `gtk-layer-shell`, `gobject-introspection`, `cairo`, `pkgconf`
 
@@ -51,7 +51,6 @@ On Arch:
 
 ```bash
 sudo pacman -S gtk3 gtk-layer-shell gobject-introspection cairo pkgconf
-ollama pull llava:7b
 ```
 
 ## Installation
@@ -119,14 +118,11 @@ Inside an activated virtualenv the same commands work without the `uv run` prefi
 | Setting | Default | Meaning |
 |---|---|---|
 | `wallpaper_dir` | `~/Images/Wallpapers/paintings` | Wallpapers outside this directory are ignored |
-| `vlm_model` | `llava:7b` | Any vision model available to Ollama |
-| `fallback_mode` | `reminiscent` | What a weak match produces: `reminiscent` or `haiku` |
+| `show_weak_matches` | `True` | Show the nearest artwork below the fuzzy threshold, or say nothing |
 | `confident_score` | `0.92` | At or above this, the artwork is named outright |
 | `fuzzy_score` | `0.75` | At or above this, it is reported as a resemblance |
 | `font_family`, `fg_color`, `bg_color` | Gruvbox | Overlay styling |
 | `margin_x`, `margin_y`, `width_chars` | 10, 10, 45 | Overlay position and text width |
-
-`OLLAMA_URL` and `ARTWALL_VLM_MODEL` can also be set in the environment.
 
 The wallpaper directory is compared after resolving symlinks, so pointing
 `~/Images/Wallpapers` at a synced folder elsewhere works.
@@ -142,13 +138,12 @@ uv run pytest tests/
 
 * CLIP matches the image, so a cropped, recoloured or heavily filtered version of a
   painting can score below the confident threshold even when the work is in the index.
-* The index only covers what the ingest sources publish. Anything outside it falls back to
-  a resemblance or a haiku.
-* Descriptions come from a small local vision model. They read well enough, but they are
-  not art history.
-* Inference takes anywhere from a few seconds to a minute depending on model and hardware,
-  so the overlay appears shortly after the wallpaper changes. Cached wallpapers are
-  instant.
+* The index only covers what the ingest sources publish. Anything outside it is shown as
+  a resemblance at best.
+* The overlay shows what the index knows, which is the title, artist and year. Earlier
+  versions wrote a description with a local vision model; that was removed because it
+  spun up a GPU for a desktop ornament. Richer detail, such as medium or collection,
+  would be better taken from the museum APIs during ingest.
 * The daemon polls `hyprctl` instead of subscribing to an event, because hyprpaper does
   not emit wallpaper change events.
 * The overlay sits on the bottom layer, just above the wallpaper, so any open window

@@ -30,7 +30,7 @@ session.headers.update(HEADERS)
 
 
 def download_temp_image(url: str) -> Optional[Path]:
-    """Streams an image from a URL into a temporary file for VLM embedding."""
+    """Streams an image from a URL into a temporary file so it can be embedded."""
     try:
         response = session.get(url, stream=True, timeout=15)
         if response.status_code != 200:

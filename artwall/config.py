@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,19 +13,14 @@ class Config:
     cache_dir: Path = Path.home() / ".cache" / "artwall"
     index_dir: Path = Path.home() / ".cache" / "artwall" / "clip_index"
 
-    # Ollama
-    ollama_url: str = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-    vlm_model: str = os.getenv("ARTWALL_VLM_MODEL", "llava:7b")
-    ollama_timeout: int = 120
-
     # Cosine similarity thresholds for the CLIP index. At or above confident_score the
     # match is reported as the artwork itself; between fuzzy_score and confident_score it
     # is reported as a resemblance.
     confident_score: float = 0.92
     fuzzy_score: float = 0.75
 
-    # What happens below fuzzy_score: "haiku" or "reminiscent".
-    fallback_mode: str = "reminiscent"
+    # Below fuzzy_score, show the nearest artwork as a resemblance anyway, or say nothing.
+    show_weak_matches: bool = True
 
     # Overlay appearance. Defaults line up with a Gruvbox Waybar.
     font_family: str = "JetBrainsMono Nerd Font Mono"
