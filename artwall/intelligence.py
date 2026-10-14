@@ -30,7 +30,7 @@ class LocalCLIPIndex:
     Compares the current wallpaper against a pre-computed database of museum masterpieces.
     """
 
-    def __init__(self, index_dir: str = "~/.cache/artwall/clip_index"):
+    def __init__(self, index_dir: Path | str = Path.home() / ".cache" / "artwall" / "clip_index"):
         self.index_dir = Path(index_dir).expanduser()
         self.embeddings_path = self.index_dir / "embeddings.npy"
         self.metadata_path = self.index_dir / "metadata.json"
@@ -41,9 +41,14 @@ class LocalCLIPIndex:
 
         self.embeddings = None
         self.metadata = []
-        
-        # Buffer to prevent excessive disk writes during massive ingestions
-        self.unsaved_changes = 0 
+
+        # New vectors are appended here and stacked once at save time. Growing the
+        # matrix with vstack on every image copies the whole array each time, which
+        # is quadratic over a run of tens of thousands of artworks.
+        self._pending = []
+
+        # Buffer to prevent excessive disk writes during large ingestions
+        self.unsaved_changes = 0
 
         # Enforce CPU usage to save VRAM for Ollama inference
         self.device = "cpu"
@@ -63,7 +68,7 @@ class LocalCLIPIndex:
                 logger.error(f"Failed to load local CLIP index: {e}")
         else:
             logger.warning(
-                "No local CLIP index found. Please run populate_gallery_index.py."
+                "No local CLIP index found. Run populate_index.py to build one."
             )
 
     def _init_model(self) -> bool:
@@ -98,7 +103,7 @@ class LocalCLIPIndex:
             image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
 
             # 2. Extract 512-dimensional vector embedding
-            with torch.no_grad(), torch.cuda.amp.autocast():
+            with torch.no_grad():
                 query_feature = self.model.encode_image(image_tensor)
                 query_feature /= query_feature.norm(dim=-1, keepdim=True)
                 query_vector = query_feature.cpu().numpy().flatten()
@@ -110,10 +115,7 @@ class LocalCLIPIndex:
                 "year": year
             })
 
-            if self.embeddings is None:
-                self.embeddings = np.array([query_vector])
-            else:
-                self.embeddings = np.vstack([self.embeddings, query_vector])
+            self._pending.append(query_vector)
 
             # 4. Smart Saving
             self.unsaved_changes += 1
@@ -126,11 +128,20 @@ class LocalCLIPIndex:
             logger.error(f"Error computing embedding for {title}: {e}")
             return False
 
+    def _flush_pending(self):
+        """Folds newly computed vectors into the embedding matrix."""
+        if not self._pending:
+            return
+        new = np.asarray(self._pending, dtype=np.float32)
+        self.embeddings = new if self.embeddings is None else np.vstack([self.embeddings, new])
+        self._pending = []
+
     def save_index(self):
-        """Flushes the in-memory arrays to the SSD."""
+        """Flushes the in-memory arrays to disk."""
         if self.unsaved_changes == 0:
             return
-            
+
+        self._flush_pending()
         try:
             self.index_dir.mkdir(parents=True, exist_ok=True)
             if self.embeddings is not None:
@@ -146,6 +157,7 @@ class LocalCLIPIndex:
         Calculates cosine similarity between the current wallpaper and the local index.
         Always returns a tuple of (best_metadata_dict, best_score).
         """
+        self._flush_pending()
         if self.embeddings is None or len(self.metadata) == 0:
             return None, 0.0
 
@@ -158,7 +170,7 @@ class LocalCLIPIndex:
             image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
 
             # 2. Extract 512-dimensional vector embedding
-            with torch.no_grad(), torch.cuda.amp.autocast():
+            with torch.no_grad():
                 query_feature = self.model.encode_image(image_tensor)
                 query_feature /= query_feature.norm(dim=-1, keepdim=True)
                 query_vector = query_feature.cpu().numpy().flatten()
@@ -191,12 +203,12 @@ class ArtIntelligence:
     def __init__(self, config: Config):
         self.cfg = config
 
-        self.cache_dir = Path.home() / ".cache" / "artwall"
+        self.cache_dir = config.cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file = self.cache_dir / "known_art.json"
+        self.cache_file = config.cache_file
 
         self.known_art = self._load_cache()
-        self.clip_index = LocalCLIPIndex()
+        self.clip_index = LocalCLIPIndex(config.index_dir)
 
     def _load_cache(self) -> dict:
         """Loads previously processed wallpaper hashes from disk."""
@@ -276,7 +288,7 @@ class ArtIntelligence:
         try:
             logger.debug(f"Sending request to Ollama ({self.cfg.vlm_model})...")
             start_time = time.time()
-            res = requests.post(self.cfg.ollama_url, json=payload, timeout=120)
+            res = requests.post(self.cfg.ollama_url, json=payload, timeout=self.cfg.ollama_timeout)
             res.raise_for_status()
 
             description = res.json().get("response", "").strip()
@@ -319,13 +331,13 @@ class ArtIntelligence:
         clip_match, score = self.clip_index.search(image_path)
 
         if not clip_match:
-             meta["description"] = "No local database found. Run populate_gallery_index.py."
+             meta["description"] = "No local database found. Run populate_index.py."
              return meta
 
         context_str = f"{clip_match['title']} by {clip_match['artist']} ({clip_match.get('year', '')})"
 
-        # Logic Tree: Decide how to handle the score based on config
-        if score >= 0.92:
+        # Decide how to report the match. Thresholds live in the config.
+        if score >= self.cfg.confident_score:
             # Tier 3a: Confident Exact Match
             meta["title"] = clip_match["title"]
             meta["artist"] = clip_match["artist"]
@@ -334,8 +346,8 @@ class ArtIntelligence:
                 image_path, context=context_str, mode="confident"
             )
             
-        elif score >= 0.75 or getattr(self.cfg, "fallback_mode", "haiku") == "reminiscent":
-            # Tier 3b: Doubtful/Fuzzy Match (Or forced via config)
+        elif score >= self.cfg.fuzzy_score or self.cfg.fallback_mode == "reminiscent":
+            # Tier 3b: fuzzy match, or a weak match that the config asks to report anyway
             meta["title"] = f"Reminiscent of: {clip_match['title']}"
             meta["artist"] = clip_match["artist"]
             meta["year"] = clip_match.get("year", "")

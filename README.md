@@ -1,170 +1,156 @@
 # artwall-hypr
 
-An offline, local-AI desktop widget and annotation engine designed specifically for the Hyprland Wayland compositor.
+Identifies the painting on your Hyprland desktop and annotates it with a small overlay in
+the corner of the screen. Everything runs locally: a CLIP index of museum collections does
+the matching, and a local Ollama vision model writes the description. No API keys, and no
+image leaves the machine.
 
-`artwall-hypr` automatically detects your active wallpaper, identifies classical artwork using a 100% local vector search engine, and projects a sleek, Waybar-aligned GTK Layer-Shell overlay over your desktop. It provides historical metadata, confidence-rated artist attribution, and AI-generated visual descriptions without mutating your original wallpaper files or sending image data to external cloud APIs.
+Wallpaper files are never modified. The text is drawn on a `gtk-layer-shell` surface above
+the wallpaper, so the original image stays untouched on disk.
 
----
-
-## Key Features
-
-* **100% Offline & Local-First:** No cloud API keys, no monthly fees, and zero web scrapers.
-* **GTK Layer-Shell Wayland Overlay:** Replaces heavy image-editing tools with a native, GPU-accelerated transparent GTK widget that sits directly above your wallpaper layer.
-* **OpenCLIP Vector Search:** Fast offline vector matching powered by PyTorch and OpenAI's CLIP (`ViT-B-32`) to identify masterpieces from your local database in milliseconds.
-* **Anti-Hallucination Guardrails:** Utilizes local Ollama VLMs (`llava`, `moondream`) with strict prompt constraints to write museum curator blurbs or evocative haikus without spatial rambling.
-* **Graduated Confidence Modes:** Gracefully indicates certainty levels (e.g., *Reminiscent of...*) when image matches fall between fuzzy and exact thresholds.
-* **Automated Daemon Mode:** Includes a lightweight background listener (`daemon.py`) that detects wallpaper updates instantly across any randomizer script or keybinding.
-
----
-
-## Architecture
-
-The system operates on a strict **local-first 3-tier pipeline** designed to maximize speed while preserving system VRAM:
+## How it works
 
 ```
-[ Active Wallpaper ]
-         │
-         ▼
- ┌───────────────┐
- │ SHA-256 Cache │ ──( Hit )──► [ Instant Metadata Overlay ]
- └───────┬───────┘
-         │ ( Miss )
-         ▼
- ┌──────────────────────┐
- │ Local OpenCLIP Index │ ──( Cosine Match )──► Score ≥ 0.92 : Confident Curator Blurb
- └───────┬──────────────┘                       Score ≥ 0.75 : "Reminiscent of..." Mode
-         │ ( Miss )
-         ▼
- ┌──────────────────────┐
- │ Local Ollama VLM     │ ──► Configurable Fallback ('reminiscent' or 'haiku')
- └──────────────────────┘
-
+[ active wallpaper ]
+         |
+         v
+ +---------------+
+ | SHA-256 cache | --(hit)--> show stored metadata, no inference
+ +-------+-------+
+         | (miss)
+         v
+ +----------------------+
+ | local CLIP index     | --> score >= 0.92 : reported as that artwork
+ +-------+--------------+     score >= 0.75 : reported as "Reminiscent of ..."
+         |
+         v
+ +----------------------+
+ | local Ollama VLM     | --> writes the description, or a haiku on a weak match
+ +----------------------+
 ```
 
-1. **SHA-256 Cache:** Hashes the active wallpaper file to instantly restore previously processed metadata from local storage.
-2. **Local OpenCLIP Vector Search:** Computes 512-dimensional vector embeddings on the system CPU and runs Cosine Similarity searches against a pre-computed matrix (`.npy`) of museum artworks.
-3. **Ollama VLM Processing:**
-* **Exact Match ($\ge 0.92$):** Generates an educational 2-sentence museum curator description.
-* **Fuzzy Match ($0.75 \le \text{Score} < 0.92$):** Updates the UI title to *Reminiscent of...* and prompts the VLM to compare stylistic techniques.
-* **Vector Miss ($< 0.75$):** Triggered based on your `config.py` setting—either forcing a comparison to the nearest database artwork or writing a 3-line haiku.
+1. The wallpaper file is hashed. A hash seen before skips straight to the stored result,
+   so repeat wallpapers cost nothing.
+2. CLIP (`ViT-B-32`, on CPU) embeds the image and compares it against a prebuilt matrix of
+   museum artwork embeddings using cosine similarity.
+3. The score decides how the result is phrased. A confident match is named outright, a
+   fuzzy one is described as a resemblance, and a weak match falls back to either a
+   resemblance or a haiku depending on `fallback_mode`.
+4. The vision model writes one or two sentences, which go into the overlay.
 
+Thresholds and fallback behaviour live in `artwall/config.py`.
 
+## Requirements
 
----
+* Hyprland, with `hyprpaper` setting the wallpaper
+* `ollama` running locally with a vision model pulled, such as `llava:7b` or `moondream`
+* Python 3.14 or newer
+* System libraries: `gtk3`, `gtk-layer-shell`, `gobject-introspection`, `cairo`, `pkgconf`
 
-## Prerequisites
-
-### System Requirements
-
-* **OS:** Linux (Arch, Fedora, Debian, etc.)
-* **Compositor:** Hyprland
-* **Wallpaper Daemon:** `hyprpaper` (or any wallpaper changer)
-* **System Libraries:**
-* `gtk3`
-* `gtk-layer-shell`
-* `gobject-introspection`
-* `cairo`
-* `pkgconf`
-
-
-* **AI Engine:** `ollama` running locally with a vision model (e.g., `llava:7b` or `moondream`)
-
-#### Installing System Dependencies (Arch Linux)
+On Arch:
 
 ```bash
 sudo pacman -S gtk3 gtk-layer-shell gobject-introspection cairo pkgconf
-
+ollama pull llava:7b
 ```
-
-### Python Requirements
-
-* Python 3.10+
-* Package Manager: `uv` (recommended) or standard `pip`
-
----
 
 ## Installation
 
-1. **Clone the repository:**
 ```bash
-git clone https://github.com/yourusername/artwall-hypr.git
+git clone https://github.com/Erzatskaiser/artwall-hypr.git
 cd artwall-hypr
-
-```
-
-
-2. **Set up the virtual environment and install dependencies:**
-Using `uv`:
-```bash
 uv venv
 source .venv/bin/activate
 uv sync
-uv add PyGObject
-
 ```
 
+PyGObject builds against the system GTK libraries listed above, so install those first.
 
-3. **Configure the system:**
-Review `artwall/config.py` to ensure `wallpaper_dir` points to your local wallpaper collection:
-```python
-# Fallback behavior when vector search confidence is low ('reminiscent' or 'haiku')
-fallback_mode: str = "reminiscent"
+## Building the index
 
-```
-
-
-
----
-
-## Usage
-
-### 1. Populate the Local Gallery Index
-
-Build your local vector database before launching the annotator. This script streams public domain artwork metadata from major institutions (such as the Art Institute of Chicago and WikiArt) to construct your local `.npy` vector index.
+Nothing can be identified until the local index exists. This downloads thumbnails from
+open access museum APIs, embeds them, and writes the vectors to
+`~/.cache/artwall/clip_index`:
 
 ```bash
-python populate_gallery_index.py
-
+python -m artwall.ingest
 ```
 
-### 2. Run the Background Daemon (Recommended)
+Sources are the National Gallery of Art, the Cleveland Museum of Art, the National Gallery
+of Denmark, the Art Institute of Chicago, WikiArt, and the Met. A full run fetches roughly
+15,000 artworks and takes a few hours, mostly waiting on rate limits. It can be
+interrupted, and whatever has been indexed so far is saved.
 
-To make `artwall-hypr` run autonomously, start the daemon process. It sits silently in the background using negligible CPU, listening for wallpaper swaps:
+For a subset, or a shorter run:
+
+```bash
+python -m artwall.ingest --sources nga,met --limit 500
+```
+
+## Running it
+
+Once, against the current wallpaper:
+
+```bash
+python -m artwall.cli          # -v shows match scores and timings
+python -m artwall.cli --clear  # take the overlay off screen
+```
+
+As a daemon that watches for wallpaper changes:
 
 ```bash
 python -m artwall.daemon
-
 ```
 
-To auto-start the daemon on login, add this line to your `~/.config/hypr/hyprland.conf`:
+To start it with your session, add this to `~/.config/hypr/hyprland.conf`:
 
 ```text
-exec-once = ~/.venv/bin/python -m /path/to/artwall-hypr/artwall/daemon.py
-
+exec-once = /path/to/artwall-hypr/.venv/bin/python -m artwall.daemon
 ```
 
-### 3. Run One-Shot Execution (CLI)
+Installing the package also provides `artwall`, `artwall-daemon` and `artwall-index` as
+commands.
 
-If you prefer to trigger the analysis manually via keybindings or scripts:
+## Configuration
+
+`artwall/config.py` holds the settings. The ones worth looking at first:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `wallpaper_dir` | `~/Images/Wallpapers/paintings` | Wallpapers outside this directory are ignored |
+| `vlm_model` | `llava:7b` | Any vision model available to Ollama |
+| `fallback_mode` | `reminiscent` | What a weak match produces: `reminiscent` or `haiku` |
+| `confident_score` | `0.92` | At or above this, the artwork is named outright |
+| `fuzzy_score` | `0.75` | At or above this, it is reported as a resemblance |
+| `font_family`, `fg_color`, `bg_color` | Gruvbox | Overlay styling |
+| `margin_x`, `margin_y`, `width_chars` | 10, 10, 45 | Overlay position and text width |
+
+`OLLAMA_URL` and `ARTWALL_VLM_MODEL` can also be set in the environment.
+
+The wallpaper directory is compared after resolving symlinks, so pointing
+`~/Images/Wallpapers` at a synced folder elsewhere works.
+
+## Tests
 
 ```bash
-python main.py
-
+uv pip install pytest
+python -m pytest tests/
 ```
 
-Pass the verbose flag for real-time debug logs and CLIP similarity scores:
+## Limitations
 
-```bash
-python main.py -v
+* CLIP matches the image, so a cropped, recoloured or heavily filtered version of a
+  painting can score below the confident threshold even when the work is in the index.
+* The index only covers what the ingest sources publish. Anything outside it falls back to
+  a resemblance or a haiku.
+* Descriptions come from a small local vision model. They read well enough, but they are
+  not art history.
+* Inference takes anywhere from a few seconds to a minute depending on model and hardware,
+  so the overlay appears shortly after the wallpaper changes. Cached wallpapers are
+  instant.
+* The daemon polls `hyprctl` instead of subscribing to an event, because hyprpaper does
+  not emit wallpaper change events.
 
-```
+## License
 
----
-
-## How the GTK Wayland Overlay Works
-
-Unlike legacy scripts that burn text directly into wallpaper JPEGs, `artwall-hypr` uses **`gtk-layer-shell`** to construct a native GTK3 surface anchored to the `BOTTOM` Wayland layer.
-
-* **Zero File Mutation:** Your original high-resolution wallpaper files remain completely untouched on disk and in VRAM.
-* **Waybar Geometry Alignment:** Margin offsets (`10px`) and typography scales (`14px JetBrains Mono`) are synchronized with Waybar's `.modules-right` rules for visual cohesion.
-* **Pango Vector Typography:** Text is rendered natively by the GTK font engine with crisp word-wrapping, right-justification, and rounded container borders (`border-radius: 10px`).
+GPL-3.0. See [LICENSE](LICENSE).

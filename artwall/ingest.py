@@ -1,4 +1,4 @@
-import os
+import argparse
 import csv
 import time
 import logging
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 # Import the local index from your package
-from artwall.intelligence import LocalCLIPIndex
+from .intelligence import LocalCLIPIndex
 
 # Configure clean logging
 logging.basicConfig(
@@ -19,7 +19,10 @@ logging.basicConfig(
 logger = logging.getLogger("artwall.ingest")
 
 # Polite User-Agent required by museum open-data policies
-HEADERS = {"User-Agent": "artwall-ingest/2.0 (personal desktop wallpaper indexer; +https://github.com/)"}
+HEADERS = {
+    "User-Agent": "artwall-ingest/2.0 "
+    "(personal desktop wallpaper indexer; +https://github.com/Erzatskaiser/artwall-hypr)"
+}
 
 # Use a global session to speed up repeated connections
 session = requests.Session()
@@ -371,33 +374,64 @@ def ingest_nga(index: LocalCLIPIndex, target_count: int = 2000):
     except Exception as e:
         logger.error(f"Failed to ingest NGA: {e}")
 
+SOURCES = {
+    "nga": (ingest_nga, 3000),
+    "cleveland": (ingest_cleveland, 3000),
+    "smk": (ingest_smk, 3000),
+    "aic": (ingest_aic, 2000),
+    "wikiart": (ingest_wikiart, 2000),
+    "met": (ingest_met, 2000),
+}
+
+
 def main():
-    logger.info("Initializing Local CLIP Index...")
+    parser = argparse.ArgumentParser(
+        description="Build the local CLIP index from open access museum collections."
+    )
+    parser.add_argument(
+        "-s",
+        "--sources",
+        default="all",
+        help="Comma separated list of sources to ingest, or 'all'. "
+        f"Available: {', '.join(SOURCES)}.",
+    )
+    parser.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=None,
+        help="Override the per source artwork limit.",
+    )
+    args = parser.parse_args()
+
+    if args.sources == "all":
+        selected = list(SOURCES)
+    else:
+        selected = [s.strip().lower() for s in args.sources.split(",") if s.strip()]
+        unknown = [s for s in selected if s not in SOURCES]
+        if unknown:
+            parser.error(f"unknown source(s): {', '.join(unknown)}")
+
+    logger.info("Initializing local CLIP index...")
     index = LocalCLIPIndex()
 
-    # Dictionary of ingest functions to easily toggle or add more in the future
-    ingest_sources = [
-        (ingest_nga, 3000),
-        (ingest_cleveland, 3000),
-        (ingest_smk, 3000),
-        (ingest_aic, 2000),
-        (ingest_wikiart, 2000),
-        (ingest_met, 2000)
-    ]
-
-    for ingest_func, limit in ingest_sources:
+    for name in selected:
+        ingest_func, default_limit = SOURCES[name]
+        limit = args.limit if args.limit is not None else default_limit
         try:
             ingest_func(index, target_count=limit)
+        except KeyboardInterrupt:
+            logger.warning("Interrupted. Saving what has been indexed so far.")
+            break
         except Exception as e:
-            logger.error(f"Critical failure in {ingest_func.__name__}: {e}")
+            logger.error(f"Ingestion from {name} failed: {e}")
 
-    # Force a final save to flush the buffer
+    # Flush whatever is still buffered, including after an interrupt
+    index.unsaved_changes = max(index.unsaved_changes, 1)
     index.save_index()
 
-    logger.info("==================================================")
-    logger.info(f"Ingestion Complete! Total artworks in database: {len(index.metadata)}")
-    logger.info(f"Vector Database saved to: {index.index_dir}")
-    logger.info("==================================================")
+    logger.info(f"Done. {len(index.metadata)} artworks in the index.")
+    logger.info(f"Index location: {index.index_dir}")
 
 
 if __name__ == "__main__":

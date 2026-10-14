@@ -19,9 +19,15 @@ def setup_logging(verbose: bool):
     )
 
 def main():
-    parser = argparse.ArgumentParser(description="Artwall Background Daemon")
+    parser = argparse.ArgumentParser(description="Watch for wallpaper changes and update the overlay.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
-    parser.add_argument("-i", "--interval", type=float, default=1.0, help="Polling interval in seconds.")
+    parser.add_argument(
+        "-i",
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Seconds between checks for a wallpaper change.",
+    )
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -31,7 +37,7 @@ def main():
     intel = ArtIntelligence(cfg)
     renderer = WallpaperRenderer(cfg)
 
-    logger.info(f"Starting Artwall Daemon (Polling every {args.interval}s)...")
+    logger.info(f"Watching for wallpaper changes every {args.interval}s.")
     
     # Store the state of the last seen wallpaper
     last_wallpaper_path = None
@@ -43,19 +49,19 @@ def main():
             # If a wallpaper is detected and it is DIFFERENT from the last one we processed
             if current_wall and current_wall != last_wallpaper_path:
                 
-                # Check if it's actually in our art directory
-                if cfg.wallpaper_dir.parts == current_wall.parent.parts:
+                # Only act on wallpapers inside the configured art directory
+                if cfg.is_art_wallpaper(current_wall):
                     logger.info(f"Wallpaper change detected! New image: {current_wall.name}")
                     
                     try:
-                        # 1. Run the AI / Local Index Pipeline
+                        # Cache lookup, then CLIP, then the VLM
                         meta = intel.process_wallpaper(current_wall)
                         
-                        # 2. Update the GTK Overlay widget
+                        # Put the result on screen
                         if meta:
                             renderer.render_overlay(meta)
                             
-                        # 3. Update our state so we don't process it again
+                        # Remember it so the same image is not reprocessed
                         last_wallpaper_path = current_wall
                         
                     except Exception as e:
@@ -65,7 +71,6 @@ def main():
                     # Update state anyway so we don't spam the debug log
                     last_wallpaper_path = current_wall
 
-            # Sleep to prevent CPU thrashing
             time.sleep(args.interval)
 
     except KeyboardInterrupt:
