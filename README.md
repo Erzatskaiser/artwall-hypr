@@ -7,8 +7,8 @@ network once the index exists, and no image leaves the machine.
 
 ![artwall-hypr labelling a wallpaper](docs/screenshot.jpg)
 
-*The label sits in the bottom right. Here the wallpaper scored 0.884 against the index, just
-under the confident threshold, so it is offered as a resemblance rather than named outright.*
+*The label sits in the bottom right. This wallpaper matched at 0.884, above the confident
+threshold, so the painting is named outright.*
 
 Wallpaper files are never modified. The text is drawn on a `gtk-layer-shell` surface above
 the wallpaper, so the original image stays untouched on disk.
@@ -25,8 +25,8 @@ the wallpaper, so the original image stays untouched on disk.
          | (miss)
          v
  +----------------------+
- | local CLIP index     | --> score >= 0.92 : named as that artwork
- +----------------------+     score >= 0.75 : shown as "Reminiscent of ..."
+ | local CLIP index     | --> score >= 0.88 : named as that artwork
+ +----------------------+     score >= 0.78 : shown as "Reminiscent of ..."
                               below that    : shown as a resemblance, or nothing
 ```
 
@@ -119,8 +119,8 @@ Inside an activated virtualenv the same commands work without the `uv run` prefi
 |---|---|---|
 | `wallpaper_dir` | `~/Images/Wallpapers/paintings` | Wallpapers outside this directory are ignored |
 | `show_weak_matches` | `True` | Show the nearest artwork below the fuzzy threshold, or say nothing |
-| `confident_score` | `0.92` | At or above this, the artwork is named outright |
-| `fuzzy_score` | `0.75` | At or above this, it is reported as a resemblance |
+| `confident_score` | `0.88` | At or above this, the artwork is named outright |
+| `fuzzy_score` | `0.78` | At or above this, it is reported as a resemblance |
 | `font_family`, `fg_color`, `bg_color` | Gruvbox | Overlay styling |
 | `margin_x`, `margin_y`, `width_chars` | 10, 10, 45 | Overlay position and text width |
 

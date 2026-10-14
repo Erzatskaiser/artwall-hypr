@@ -16,8 +16,14 @@ class Config:
     # Cosine similarity thresholds for the CLIP index. At or above confident_score the
     # match is reported as the artwork itself; between fuzzy_score and confident_score it
     # is reported as a resemblance.
-    confident_score: float = 0.92
-    fuzzy_score: float = 0.75
+    #
+    # These were measured rather than guessed. Across a sample of 30 wallpapers, correct
+    # identifications scored 0.88 and above, a resemblance in subject or style scored
+    # roughly 0.78 to 0.88, and anything lower shared only a theme. An exact artwork does
+    # not reach 0.95 because the index holds small museum thumbnails while a wallpaper is
+    # a full resolution, often cropped, copy of the same painting.
+    confident_score: float = 0.88
+    fuzzy_score: float = 0.78
 
     # Below fuzzy_score, show the nearest artwork as a resemblance anyway, or say nothing.
     show_weak_matches: bool = True
